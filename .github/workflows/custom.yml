@@ -1,0 +1,11 @@
+name: custom
+# Template workflow — add your own steps below.
+# Triggered manually via Cofabric run-actions or the GitHub Actions UI.
+on:
+  workflow_dispatch:
+jobs:
+  custom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Custom workflow — replace this step with your own"
