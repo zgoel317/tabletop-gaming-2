@@ -1,12 +1,10 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import type { Database } from '@/lib/supabase/types'
+import type { Database } from './types'
 
 /**
- * Server-side Supabase client for use in Server Components,
- * Route Handlers, and Server Actions.
- *
- * Creates a new client per request (as required by Next.js).
+ * Creates a Supabase client for use in Server Components, Route Handlers,
+ * and Server Actions. Reads/writes auth cookies via Next.js cookie store.
  */
 export async function createClient() {
   const cookieStore = await cookies()
@@ -16,46 +14,44 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
+        getAll() {
+          return cookieStore.getAll()
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll(
+          cookiesToSet: Array<{ name: string; value: string; options?: CookieOptions }>
+        ) {
           try {
-            cookieStore.set({ name, value, ...options })
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options)
+            })
           } catch {
-            // set() can throw in Server Components — safe to ignore
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options })
-          } catch {
-            // remove() can throw in Server Components — safe to ignore
+            // The `setAll` method is called from a Server Component.
+            // This can be ignored if you have middleware refreshing user sessions.
           }
         },
       },
-    },
+    }
   )
 }
 
 /**
- * Service-role client for privileged operations (webhooks, cron jobs, etc.)
- * NEVER expose this to the browser.
+ * Creates a Supabase admin client using the service role key.
+ * ONLY use in server-side contexts (API routes, server actions).
+ * NEVER expose service role key to the browser.
  */
-export function createServiceClient() {
-  return createServerClient<Database>(
+export function createAdminClient() {
+  const { createClient: createSupabaseClient } = require('@supabase/supabase-js')
+
+  return createSupabaseClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
-      cookies: {
-        get: () => undefined,
-        set: () => {},
-        remove: () => {},
-      },
       auth: {
         autoRefreshToken: false,
         persistSession: false,
       },
-    },
+    }
   )
 }
+
+export type { Database } from './types'
