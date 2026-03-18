@@ -1,15 +1,10 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-import type { Database } from "@/lib/database.types";
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import type { Database } from '@/types/database';
 
 /**
- * Creates a Supabase server client with full Database type safety.
- *
- * Use this in Server Components, Route Handlers, and Server Actions.
- *
- * Example:
- *   const supabase = await createClient()
- *   const { data } = await supabase.from('profiles').select('*')
+ * Creates a Supabase client for use in Server Components, Server Actions,
+ * and Route Handlers. Handles cookie management for auth session persistence.
  */
 export async function createClient() {
   const cookieStore = await cookies();
@@ -19,20 +14,46 @@ export async function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll();
+        get(name: string) {
+          return cookieStore.get(name)?.value;
         },
-        setAll(cookiesToSet) {
+        set(name: string, value: string, options: CookieOptions) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            );
+            cookieStore.set({ name, value, ...options });
           } catch {
-            // setAll is called from a Server Component where cookies
-            // cannot be mutated. This is safe to ignore if you have
-            // a middleware refreshing sessions.
+            // Server Components cannot set cookies; middleware handles this
           }
         },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: '', ...options });
+          } catch {
+            // Server Components cannot set cookies; middleware handles this
+          }
+        },
+      },
+    }
+  );
+}
+
+/**
+ * Creates a Supabase admin client using the service role key.
+ * WARNING: Never expose this on the client side. Use only in secure server contexts.
+ */
+export function createAdminClient() {
+  const { createClient } = require('@supabase/supabase-js');
+
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set');
+  }
+
+  return createClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
       },
     }
   );
