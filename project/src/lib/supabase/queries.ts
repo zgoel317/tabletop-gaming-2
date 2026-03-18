@@ -1,427 +1,516 @@
 /**
- * Reusable typed query helpers for common database operations.
- * Each function accepts an optional Supabase client so it works
- * in both browser and server contexts.
+ * Common Supabase query helpers for profiles and gaming data.
+ * These functions abstract common data access patterns.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/server';
 import type {
-  Database,
   Profile,
+  GamingPreferences,
+  AvailabilitySlot,
   ProfileSummary,
-  ProfileUpdate,
-  GamingPreference,
-  GameGenre,
+  UserGamingProfile,
   Game,
   UserGameCollection,
-  UserGameCollectionInsert,
-  UserGameCollectionUpdate,
   CollectionStatus,
-  UserRatingInsert,
-  NearbyProfile,
-  ProfileSearchResult,
-  FollowCounts,
-} from './types'
-
-type SupabaseDB = SupabaseClient<Database>
+  ExperienceLevel,
+  GameGenre,
+} from '@/types/database.types';
 
 // ============================================================
-// PROFILES
+// PROFILE QUERIES
 // ============================================================
 
-/** Fetch the full profile for the authenticated user */
-export async function getMyProfile(client: SupabaseDB) {
-  const { data, error } = await client
+/**
+ * Fetch a user's full profile by ID.
+ * Returns null if not found or not accessible.
+ */
+export async function getProfileById(
+  userId: string
+): Promise<Profile | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
     .from('profiles')
     .select('*')
-    .eq('id', (await client.auth.getUser()).data.user?.id ?? '')
-    .single()
+    .eq('id', userId)
+    .single();
 
-  if (error) throw error
-  return data as Profile
+  if (error) {
+    console.error('Error fetching profile:', error.message);
+    return null;
+  }
+
+  return data;
 }
 
-/** Fetch a public profile summary by username */
+/**
+ * Fetch a user's profile by username.
+ */
 export async function getProfileByUsername(
-  client: SupabaseDB,
-  username: string,
-): Promise<ProfileSummary | null> {
-  const { data, error } = await client
-    .from('profile_summaries')
+  username: string
+): Promise<Profile | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('profiles')
     .select('*')
     .eq('username', username)
-    .single()
+    .eq('is_profile_public', true)
+    .single();
 
   if (error) {
-    if (error.code === 'PGRST116') return null // not found
-    throw error
+    console.error('Error fetching profile by username:', error.message);
+    return null;
   }
-  return data as ProfileSummary
+
+  return data;
 }
 
-/** Fetch a public profile summary by ID */
-export async function getProfileById(
-  client: SupabaseDB,
-  profileId: string,
+/**
+ * Fetch a profile summary (with computed stats) by ID.
+ */
+export async function getProfileSummaryById(
+  userId: string
 ): Promise<ProfileSummary | null> {
-  const { data, error } = await client
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
     .from('profile_summaries')
     .select('*')
-    .eq('id', profileId)
-    .single()
+    .eq('id', userId)
+    .single();
 
   if (error) {
-    if (error.code === 'PGRST116') return null
-    throw error
+    console.error('Error fetching profile summary:', error.message);
+    return null;
   }
-  return data as ProfileSummary
+
+  return data;
 }
 
-/** Update the authenticated user's profile */
+/**
+ * Search profiles by name or username with optional filters.
+ */
+export async function searchProfiles(params: {
+  query?: string;
+  experienceLevel?: ExperienceLevel;
+  isLookingForGroup?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<ProfileSummary[]> {
+  const supabase = await createClient();
+  const { query, experienceLevel, isLookingForGroup, limit = 20, offset = 0 } = params;
+
+  let queryBuilder = supabase
+    .from('profile_summaries')
+    .select('*')
+    .order('last_active_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (query) {
+    queryBuilder = queryBuilder.or(
+      `display_name.ilike.%${query}%,username.ilike.%${query}%`
+    );
+  }
+
+  if (experienceLevel) {
+    queryBuilder = queryBuilder.eq('experience_level', experienceLevel);
+  }
+
+  if (isLookingForGroup !== undefined) {
+    queryBuilder = queryBuilder.eq('is_looking_for_group', isLookingForGroup);
+  }
+
+  const { data, error } = await queryBuilder;
+
+  if (error) {
+    console.error('Error searching profiles:', error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+/**
+ * Find profiles near a geographic location.
+ */
+export async function findNearbyProfiles(params: {
+  lat: number;
+  lng: number;
+  radiusKm?: number;
+  limit?: number;
+  offset?: number;
+}): Promise<Array<ProfileSummary & { distance_km: number }>> {
+  const supabase = await createClient();
+  const { lat, lng, radiusKm = 25, limit = 20, offset = 0 } = params;
+
+  const { data: nearbyData, error: nearbyError } = await supabase
+    .rpc('find_nearby_profiles', {
+      lat,
+      lng,
+      radius_km: radiusKm,
+      limit_count: limit,
+      offset_count: offset,
+    });
+
+  if (nearbyError || !nearbyData?.length) {
+    if (nearbyError) console.error('Error finding nearby profiles:', nearbyError.message);
+    return [];
+  }
+
+  const profileIds = nearbyData.map((r: { profile_id: string }) => r.profile_id);
+  const distanceMap = new Map(
+    nearbyData.map((r: { profile_id: string; distance_km: number }) => [
+      r.profile_id,
+      r.distance_km,
+    ])
+  );
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from('profile_summaries')
+    .select('*')
+    .in('id', profileIds);
+
+  if (profilesError) {
+    console.error('Error fetching nearby profile details:', profilesError.message);
+    return [];
+  }
+
+  return (profiles || []).map((p) => ({
+    ...p,
+    distance_km: distanceMap.get(p.id) ?? 0,
+  }));
+}
+
+/**
+ * Update a user's profile.
+ */
 export async function updateProfile(
-  client: SupabaseDB,
-  profileId: string,
-  updates: ProfileUpdate,
-): Promise<Profile> {
-  const { data, error } = await client
+  userId: string,
+  updates: Partial<Omit<Profile, 'id' | 'created_at' | 'updated_at'>>
+): Promise<Profile | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
     .from('profiles')
     .update(updates)
-    .eq('id', profileId)
+    .eq('id', userId)
     .select()
-    .single()
-
-  if (error) throw error
-  return data as Profile
-}
-
-/** Set or update the user's geographic location */
-export async function setProfileLocation(
-  client: SupabaseDB,
-  profileId: string,
-  latitude: number,
-  longitude: number,
-): Promise<void> {
-  const { error } = await client.rpc('set_profile_location', {
-    p_profile_id: profileId,
-    p_latitude: latitude,
-    p_longitude: longitude,
-  })
-  if (error) throw error
-}
-
-/** Search profiles by username / display name */
-export async function searchProfiles(
-  client: SupabaseDB,
-  query: string,
-  limit = 20,
-  offset = 0,
-): Promise<ProfileSearchResult[]> {
-  const { data, error } = await client.rpc('search_profiles', {
-    p_query: query,
-    p_limit: limit,
-    p_offset: offset,
-  })
-  if (error) throw error
-  return (data ?? []) as ProfileSearchResult[]
-}
-
-/** Find profiles near a geographic point */
-export async function findNearbyProfiles(
-  client: SupabaseDB,
-  latitude: number,
-  longitude: number,
-  radiusKm = 50,
-  limit = 20,
-  offset = 0,
-): Promise<NearbyProfile[]> {
-  const { data, error } = await client.rpc('find_nearby_profiles', {
-    p_latitude: latitude,
-    p_longitude: longitude,
-    p_radius_km: radiusKm,
-    p_limit: limit,
-    p_offset: offset,
-  })
-  if (error) throw error
-  return (data ?? []) as NearbyProfile[]
-}
-
-// ============================================================
-// GAMING PREFERENCES
-// ============================================================
-
-/** Get all gaming preferences for a profile */
-export async function getGamingPreferences(
-  client: SupabaseDB,
-  profileId: string,
-): Promise<GamingPreference[]> {
-  const { data, error } = await client
-    .from('gaming_preferences')
-    .select('*')
-    .eq('profile_id', profileId)
-    .order('preference_level', { ascending: false })
-
-  if (error) throw error
-  return (data ?? []) as GamingPreference[]
-}
-
-/** Upsert a single genre preference for the current user */
-export async function upsertGamingPreference(
-  client: SupabaseDB,
-  genre: GameGenre,
-  preferenceLevel: 1 | 2 | 3 | 4 | 5 = 3,
-): Promise<GamingPreference> {
-  const { data, error } = await client.rpc('upsert_gaming_preference', {
-    p_genre: genre,
-    p_preference_level: preferenceLevel,
-  })
-  if (error) throw error
-  return data as GamingPreference
-}
-
-/** Delete a gaming preference for the current user */
-export async function deleteGamingPreference(
-  client: SupabaseDB,
-  preferenceId: string,
-): Promise<void> {
-  const { error } = await client
-    .from('gaming_preferences')
-    .delete()
-    .eq('id', preferenceId)
-  if (error) throw error
-}
-
-// ============================================================
-// GAMES
-// ============================================================
-
-/** Get a game by its Supabase UUID */
-export async function getGameById(
-  client: SupabaseDB,
-  gameId: string,
-): Promise<Game | null> {
-  const { data, error } = await client
-    .from('games')
-    .select('*')
-    .eq('id', gameId)
-    .single()
+    .single();
 
   if (error) {
-    if (error.code === 'PGRST116') return null
-    throw error
+    console.error('Error updating profile:', error.message);
+    return null;
   }
-  return data as Game
+
+  return data;
 }
 
-/** Get a game by its BoardGameGeek ID */
-export async function getGameByBggId(
-  client: SupabaseDB,
-  bggId: number,
-): Promise<Game | null> {
-  const { data, error } = await client
+// ============================================================
+// GAMING PREFERENCES QUERIES
+// ============================================================
+
+/**
+ * Fetch gaming preferences for a user.
+ */
+export async function getGamingPreferences(
+  userId: string
+): Promise<GamingPreferences | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('gaming_preferences')
+    .select('*')
+    .eq('profile_id', userId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching gaming preferences:', error.message);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Update gaming preferences for a user (upsert).
+ */
+export async function upsertGamingPreferences(
+  userId: string,
+  preferences: Partial<Omit<GamingPreferences, 'id' | 'profile_id' | 'created_at' | 'updated_at'>>
+): Promise<GamingPreferences | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('gaming_preferences')
+    .upsert({ profile_id: userId, ...preferences })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error upserting gaming preferences:', error.message);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Get full gaming profile (preferences + favorites) for a user.
+ */
+export async function getUserGamingProfile(
+  userId: string
+): Promise<UserGamingProfile | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('user_gaming_profile')
+    .select('*')
+    .eq('profile_id', userId)
+    .single();
+
+  if (error) {
+    console.error('Error fetching user gaming profile:', error.message);
+    return null;
+  }
+
+  return data;
+}
+
+// ============================================================
+// AVAILABILITY QUERIES
+// ============================================================
+
+/**
+ * Fetch all availability slots for a user.
+ */
+export async function getUserAvailability(
+  userId: string
+): Promise<AvailabilitySlot[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('availability_slots')
+    .select('*')
+    .eq('profile_id', userId)
+    .order('day_of_week')
+    .order('time_of_day');
+
+  if (error) {
+    console.error('Error fetching availability:', error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+/**
+ * Set availability for a specific day/time slot (upsert).
+ */
+export async function setAvailabilitySlot(
+  userId: string,
+  dayOfWeek: AvailabilitySlot['day_of_week'],
+  timeOfDay: AvailabilitySlot['time_of_day'],
+  isAvailable: boolean
+): Promise<AvailabilitySlot | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('availability_slots')
+    .upsert({
+      profile_id: userId,
+      day_of_week: dayOfWeek,
+      time_of_day: timeOfDay,
+      is_available: isAvailable,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error setting availability slot:', error.message);
+    return null;
+  }
+
+  return data;
+}
+
+// ============================================================
+// GAME COLLECTION QUERIES
+// ============================================================
+
+/**
+ * Fetch a user's game collection with game details.
+ */
+export async function getUserGameCollection(
+  userId: string,
+  status?: CollectionStatus
+): Promise<Array<UserGameCollection & { game: Game }>> {
+  const supabase = await createClient();
+
+  let query = supabase
+    .from('user_game_collections')
+    .select(`
+      *,
+      game:games(*)
+    `)
+    .eq('profile_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (status) {
+    query = query.eq('status', status);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error fetching game collection:', error.message);
+    return [];
+  }
+
+  return (data || []) as Array<UserGameCollection & { game: Game }>;
+}
+
+/**
+ * Add a game to a user's collection.
+ */
+export async function addGameToCollection(
+  userId: string,
+  gameId: string,
+  status: CollectionStatus,
+  extras?: Partial<Omit<UserGameCollection, 'id' | 'profile_id' | 'game_id' | 'status' | 'created_at' | 'updated_at'>>
+): Promise<UserGameCollection | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('user_game_collections')
+    .upsert({
+      profile_id: userId,
+      game_id: gameId,
+      status,
+      ...extras,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error adding game to collection:', error.message);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Remove a game from a user's collection.
+ */
+export async function removeGameFromCollection(
+  userId: string,
+  gameId: string,
+  status: CollectionStatus
+): Promise<boolean> {
+  const supabase = await createClient();
+
+  const { error } = await supabase
+    .from('user_game_collections')
+    .delete()
+    .eq('profile_id', userId)
+    .eq('game_id', gameId)
+    .eq('status', status);
+
+  if (error) {
+    console.error('Error removing game from collection:', error.message);
+    return false;
+  }
+
+  return true;
+}
+
+// ============================================================
+// GAME SEARCH QUERIES
+// ============================================================
+
+/**
+ * Search games by name using full-text search.
+ */
+export async function searchGames(params: {
+  query: string;
+  genres?: GameGenre[];
+  minPlayers?: number;
+  maxPlayers?: number;
+  minComplexity?: number;
+  maxComplexity?: number;
+  limit?: number;
+  offset?: number;
+}): Promise<Game[]> {
+  const supabase = await createClient();
+  const {
+    query,
+    genres,
+    minPlayers,
+    maxPlayers,
+    minComplexity,
+    maxComplexity,
+    limit = 20,
+    offset = 0,
+  } = params;
+
+  let queryBuilder = supabase
+    .from('games')
+    .select('*')
+    .order('average_rating', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (query) {
+    queryBuilder = queryBuilder.ilike('name', `%${query}%`);
+  }
+
+  if (genres?.length) {
+    queryBuilder = queryBuilder.overlaps('genres', genres);
+  }
+
+  if (minPlayers !== undefined) {
+    queryBuilder = queryBuilder.lte('min_players', minPlayers);
+  }
+
+  if (maxPlayers !== undefined) {
+    queryBuilder = queryBuilder.gte('max_players', maxPlayers);
+  }
+
+  if (minComplexity !== undefined) {
+    queryBuilder = queryBuilder.gte('complexity_rating', minComplexity);
+  }
+
+  if (maxComplexity !== undefined) {
+    queryBuilder = queryBuilder.lte('complexity_rating', maxComplexity);
+  }
+
+  const { data, error } = await queryBuilder;
+
+  if (error) {
+    console.error('Error searching games:', error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+/**
+ * Get a game by its BoardGameGeek ID.
+ */
+export async function getGameByBggId(bggId: number): Promise<Game | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
     .from('games')
     .select('*')
     .eq('bgg_id', bggId)
-    .single()
+    .single();
 
   if (error) {
-    if (error.code === 'PGRST116') return null
-    throw error
-  }
-  return data as Game
-}
-
-/** Search games by name */
-export async function searchGames(
-  client: SupabaseDB,
-  query: string,
-  limit = 20,
-  offset = 0,
-): Promise<Game[]> {
-  const { data, error } = await client
-    .from('games')
-    .select('*')
-    .ilike('name', `%${query}%`)
-    .order('bgg_rating', { ascending: false })
-    .range(offset, offset + limit - 1)
-
-  if (error) throw error
-  return (data ?? []) as Game[]
-}
-
-/** Filter games by genre */
-export async function getGamesByGenre(
-  client: SupabaseDB,
-  genre: GameGenre,
-  limit = 20,
-  offset = 0,
-): Promise<Game[]> {
-  const { data, error } = await client
-    .from('games')
-    .select('*')
-    .contains('genres', [genre])
-    .order('bgg_rating', { ascending: false })
-    .range(offset, offset + limit - 1)
-
-  if (error) throw error
-  return (data ?? []) as Game[]
-}
-
-// ============================================================
-// USER GAME COLLECTION
-// ============================================================
-
-/** Get a user's game collection, optionally filtered by status */
-export async function getUserCollection(
-  client: SupabaseDB,
-  profileId: string,
-  status?: CollectionStatus,
-) {
-  let query = client
-    .from('user_collection_details')
-    .select('*')
-    .eq('profile_id', profileId)
-    .order('game_name', { ascending: true })
-
-  if (status) {
-    query = query.eq('status', status)
+    console.error('Error fetching game by BGG ID:', error.message);
+    return null;
   }
 
-  const { data, error } = await query
-  if (error) throw error
-  return data ?? []
-}
-
-/** Add a game to the current user's collection */
-export async function addToCollection(
-  client: SupabaseDB,
-  entry: UserGameCollectionInsert,
-): Promise<UserGameCollection> {
-  const { data, error } = await client
-    .from('user_game_collection')
-    .insert(entry)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data as UserGameCollection
-}
-
-/** Update a collection entry */
-export async function updateCollectionEntry(
-  client: SupabaseDB,
-  entryId: string,
-  updates: UserGameCollectionUpdate,
-): Promise<UserGameCollection> {
-  const { data, error } = await client
-    .from('user_game_collection')
-    .update(updates)
-    .eq('id', entryId)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data as UserGameCollection
-}
-
-/** Remove a game from the current user's collection */
-export async function removeFromCollection(
-  client: SupabaseDB,
-  entryId: string,
-): Promise<void> {
-  const { error } = await client
-    .from('user_game_collection')
-    .delete()
-    .eq('id', entryId)
-  if (error) throw error
-}
-
-// ============================================================
-// USER RATINGS
-// ============================================================
-
-/** Submit a rating for another user */
-export async function submitUserRating(
-  client: SupabaseDB,
-  rating: UserRatingInsert,
-) {
-  const { data, error } = await client
-    .from('user_ratings')
-    .insert(rating)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
-}
-
-/** Get all ratings received by a user */
-export async function getUserRatings(client: SupabaseDB, profileId: string) {
-  const { data, error } = await client
-    .from('user_ratings')
-    .select('*, rater:profiles!rater_id(id, username, avatar_url)')
-    .eq('rated_id', profileId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data ?? []
-}
-
-// ============================================================
-// FOLLOWS
-// ============================================================
-
-/** Follow a user */
-export async function followUser(
-  client: SupabaseDB,
-  followerId: string,
-  followingId: string,
-): Promise<void> {
-  const { error } = await client
-    .from('profile_follows')
-    .insert({ follower_id: followerId, following_id: followingId })
-  if (error) throw error
-}
-
-/** Unfollow a user */
-export async function unfollowUser(
-  client: SupabaseDB,
-  followerId: string,
-  followingId: string,
-): Promise<void> {
-  const { error } = await client
-    .from('profile_follows')
-    .delete()
-    .eq('follower_id', followerId)
-    .eq('following_id', followingId)
-  if (error) throw error
-}
-
-/** Check whether the current user follows a specific profile */
-export async function isFollowing(
-  client: SupabaseDB,
-  followerId: string,
-  followingId: string,
-): Promise<boolean> {
-  const { data, error } = await client
-    .from('profile_follows')
-    .select('follower_id')
-    .eq('follower_id', followerId)
-    .eq('following_id', followingId)
-    .maybeSingle()
-
-  if (error) throw error
-  return data !== null
-}
-
-/** Get follower / following counts for a profile */
-export async function getFollowCounts(
-  client: SupabaseDB,
-  profileId: string,
-): Promise<FollowCounts> {
-  const { data, error } = await client.rpc('get_follow_counts', {
-    p_profile_id: profileId,
-  })
-  if (error) throw error
-  const row = (data as FollowCounts[])?.[0]
-  return row ?? { followers: 0, following: 0 }
+  return data;
 }

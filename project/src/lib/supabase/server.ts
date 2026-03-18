@@ -1,10 +1,10 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { Database } from '@/types/database';
+import type { Database } from '@/types/database.types';
 
 /**
  * Creates a Supabase client for use in Server Components, Server Actions,
- * and Route Handlers. Handles cookie management for auth session persistence.
+ * and Route Handlers. Handles cookie management for session persistence.
  */
 export async function createClient() {
   const cookieStore = await cookies();
@@ -21,14 +21,16 @@ export async function createClient() {
           try {
             cookieStore.set({ name, value, ...options });
           } catch {
-            // Server Components cannot set cookies; middleware handles this
+            // The `set` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing sessions.
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value: '', ...options });
           } catch {
-            // Server Components cannot set cookies; middleware handles this
+            // The `delete` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing sessions.
           }
         },
       },
@@ -38,19 +40,27 @@ export async function createClient() {
 
 /**
  * Creates a Supabase admin client using the service role key.
- * WARNING: Never expose this on the client side. Use only in secure server contexts.
+ * This bypasses RLS — only use in trusted server-side contexts.
+ * Never expose the service role key to the client.
  */
 export function createAdminClient() {
-  const { createClient } = require('@supabase/supabase-js');
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set');
+  if (!serviceRoleKey) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is not set. Admin client cannot be created.'
+    );
   }
 
-  return createClient<Database>(
+  return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    serviceRoleKey,
     {
+      cookies: {
+        get: () => undefined,
+        set: () => {},
+        remove: () => {},
+      },
       auth: {
         autoRefreshToken: false,
         persistSession: false,

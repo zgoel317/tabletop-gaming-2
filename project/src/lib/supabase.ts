@@ -1,9 +1,9 @@
 import { createBrowserClient } from '@supabase/ssr';
-import type { Database } from '@/types/database';
+import type { Database } from '@/types/database.types';
 
 /**
  * Creates a Supabase client for use in browser/client components.
- * Uses the public anon key which is safe to expose on the client.
+ * Uses the Database generic type for full type safety.
  */
 export function createClient() {
   return createBrowserClient<Database>(
@@ -13,7 +13,7 @@ export function createClient() {
 }
 
 /**
- * Singleton browser client instance for use throughout the app.
- * Prefer this over creating new instances in components.
+ * Singleton browser client for convenience in client components.
+ * Use createClient() for SSR scenarios or when you need a fresh instance.
  */
 export const supabase = createClient();
