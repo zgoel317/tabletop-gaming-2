@@ -1,32 +1,28 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createServerClient as createSSRServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
-export function createClient() {
-  const cookieStore = cookies()
+export function createServerClient() {
+  const cookieStore = cookies();
 
-  return createServerClient(
+  return createSSRServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
+        getAll() {
+          return cookieStore.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll(cookiesToSet) {
           try {
-            cookieStore.set({ name, value, ...options })
-          } catch (error) {
-            // Handle error
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options })
-          } catch (error) {
-            // Handle error
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // setAll called from a Server Component — cookies can only be
+            // set in middleware or Route Handlers, so ignore the error here.
           }
         },
       },
     }
-  )
+  );
 }

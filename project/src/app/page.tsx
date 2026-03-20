@@ -1,112 +1,97 @@
-import Link from 'next/link'
-import { Users, Calendar, MapPin, MessageCircle } from 'lucide-react'
+import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-amber-50">
-      {/* Header */}
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Nav */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <h1 className="text-2xl font-bold text-primary-600">TableTop Connect</h1>
-              </div>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link
-                href="/login"
-                className="text-gray-500 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium"
-              >
-                Sign In
-              </Link>
-              <Link
-                href="/signup"
-                className="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-md text-sm font-medium"
-              >
-                Get Started
-              </Link>
-            </div>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+          <span className="text-xl font-bold text-indigo-600">
+            TabletopConnect
+          </span>
+          <nav className="flex items-center gap-4">
+            <Link
+              href="/auth/login"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900"
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/auth/signup"
+              className="text-sm font-medium bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md transition-colors"
+            >
+              Get Started
+            </Link>
+          </nav>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="py-20 text-center">
-          <h1 className="text-4xl md:text-6xl font-bold text-gray-900 mb-6">
-            Find Your Perfect
-            <span className="text-primary-600 block">Gaming Group</span>
+      {/* Hero */}
+      <main className="flex-1 flex items-center justify-center px-4">
+        <div className="max-w-2xl mx-auto text-center py-20">
+          {/* Badge */}
+          <span className="inline-block bg-indigo-100 text-indigo-700 text-sm font-medium px-3 py-1 rounded-full mb-6">
+            🎲 Built for tabletop enthusiasts
+          </span>
+
+          {/* Headline */}
+          <h1 className="text-5xl font-bold text-gray-900 mb-4 leading-tight">
+            Find your perfect{' '}
+            <span className="text-indigo-600">gaming group</span>
           </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
-            Connect with local tabletop gaming enthusiasts, organize epic game sessions, 
-            and build lasting friendships through the games you love.
+
+          {/* Subheadline */}
+          <p className="text-xl text-gray-600 mb-10 max-w-lg mx-auto">
+            TabletopConnect helps you discover local players, organize game
+            sessions, and build lasting gaming communities — all in one place.
           </p>
-          <div className="space-y-4 sm:space-y-0 sm:space-x-4 sm:flex sm:justify-center">
+
+          {/* CTAs */}
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
-              href="/signup"
-              className="w-full sm:w-auto bg-primary-600 hover:bg-primary-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition duration-200 inline-block"
+              href="/auth/signup"
+              className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-8 py-3 rounded-lg text-base transition-colors shadow-sm"
             >
-              Join the Community
+              Get Started — it&apos;s free
             </Link>
             <Link
-              href="/discover"
-              className="w-full sm:w-auto bg-white hover:bg-gray-50 text-primary-600 font-bold py-3 px-8 rounded-lg text-lg border-2 border-primary-600 transition duration-200 inline-block"
+              href="/auth/login"
+              className="inline-flex items-center justify-center border-2 border-indigo-600 text-indigo-600 hover:bg-indigo-50 font-semibold px-8 py-3 rounded-lg text-base transition-colors"
             >
-              Browse Players
+              Sign In
             </Link>
           </div>
-        </div>
 
-        {/* Features Grid */}
-        <div className="py-16">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4">
-              Everything You Need to Game Together
-            </h2>
-            <p className="text-lg text-gray-600">
-              From finding players to organizing sessions, we've got you covered
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            <div className="bg-white p-6 rounded-xl shadow-sm">
-              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center mb-4">
-                <Users className="w-6 h-6 text-primary-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Find Players</h3>
-              <p className="text-gray-600">
-                Discover local gamers who share your interests and availability
+          {/* Social proof / features */}
+          <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-8 text-left">
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+              <div className="text-2xl mb-2">🗺️</div>
+              <h3 className="font-semibold text-gray-900 mb-1">
+                Find Local Players
+              </h3>
+              <p className="text-sm text-gray-600">
+                Browse players and groups near you, filtered by game, experience,
+                and availability.
               </p>
             </div>
-
-            <div className="bg-white p-6 rounded-xl shadow-sm">
-              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center mb-4">
-                <Calendar className="w-6 h-6 text-primary-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Organize Sessions</h3>
-              <p className="text-gray-600">
-                Schedule game nights with easy RSVP and event management
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+              <div className="text-2xl mb-2">📅</div>
+              <h3 className="font-semibold text-gray-900 mb-1">
+                Organize Sessions
+              </h3>
+              <p className="text-sm text-gray-600">
+                Create game events, manage RSVPs, and keep everyone on the same
+                page.
               </p>
             </div>
-
-            <div className="bg-white p-6 rounded-xl shadow-sm">
-              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center mb-4">
-                <MapPin className="w-6 h-6 text-primary-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Local Groups</h3>
-              <p className="text-gray-600">
-                Join nearby gaming communities and build lasting friendships
-              </p>
-            </div>
-
-            <div className="bg-white p-6 rounded-xl shadow-sm">
-              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center mb-4">
-                <MessageCircle className="w-6 h-6 text-primary-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">Stay Connected</h3>
-              <p className="text-gray-600">
-                Chat with players and coordinate sessions in real-time
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+              <div className="text-2xl mb-2">💬</div>
+              <h3 className="font-semibold text-gray-900 mb-1">
+                Stay Connected
+              </h3>
+              <p className="text-sm text-gray-600">
+                Message players, join group chats, and never miss a game night
+                again.
               </p>
             </div>
           </div>
@@ -114,16 +99,9 @@ export default function HomePage() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white mt-20">
-        <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">TableTop Connect</h3>
-            <p className="text-gray-600">
-              Bringing tabletop gaming communities together, one session at a time.
-            </p>
-          </div>
-        </div>
+      <footer className="py-6 text-center text-sm text-gray-500">
+        © {new Date().getFullYear()} TabletopConnect. Roll for initiative.
       </footer>
     </div>
-  )
+  );
 }
