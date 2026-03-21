@@ -1,329 +1,421 @@
-/**
- * database.ts
- *
- * Typed Supabase query helper module.
- *
- * Wraps common database queries with full TypeScript type safety using
- * the Database interface. All functions handle errors by logging them
- * and returning null or an empty array so callers can handle missing
- * data gracefully without unhandled exceptions.
- *
- * Usage:
- *   import { getProfile, updateProfile } from '@/lib/database';
- *
- * For server-side (Next.js Server Components / Route Handlers) use
- * the server Supabase client directly from '@/lib/supabase/server'
- * and pass queries inline, or create a parallel server helpers module.
- */
+// ============================================================
+// Database Helper Functions — Tabletop Gaming Networking App
+//
+// Server-side abstraction over raw Supabase queries.
+// All functions create their own Supabase client via
+// createServerSupabaseClient() which uses the user's session
+// cookie and therefore respects Row Level Security (RLS).
+//
+// IMPORTANT: Do NOT manually insert into `profiles` after a
+// user signs up. The `handle_new_user()` trigger on auth.users
+// automatically creates a profile and default gaming_preferences
+// row. Use updateProfile() to fill in optional fields during
+// onboarding instead.
+//
+// The SUPABASE_SERVICE_ROLE_KEY bypasses RLS — never use it
+// in client-side code or expose it to the browser.
+// ============================================================
 
-import { createClient } from '@/lib/supabase';
-import type { Database } from '@/types/database';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import type {
-  Game,
-  GameCollection,
   Profile,
   ProfileUpdate,
-  UserAvailability,
-  UserAvailabilityInsert,
-  UserFavoriteGame,
-  UserRating,
+  GamingPreferences,
+  GamingPreferencesUpdate,
+  GameCollection,
+  GameCollectionInsert,
+  GameCollectionUpdate,
+  PlayerRating,
+  PlayerRatingInsert,
+  CollectionType,
+  ProfileFull,
 } from '@/types/database';
 
 // ============================================================
-// Typed Supabase client instance
-// Import this when you need direct, typed access to the client.
-// ============================================================
-export const db = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-// ============================================================
-// Profile helpers
+// PROFILES
 // ============================================================
 
 /**
- * Fetch a single profile by user ID (UUID).
- * Returns null if not found or on error.
+ * Fetch a single profile by its UUID (same as auth.users id).
+ * Returns null if not found or if RLS blocks access.
  */
-export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await db
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
+export async function getProfileById(id: string): Promise<Profile | null> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-  if (error) {
-    console.error('[getProfile]', error.message);
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Row not found
+      console.error('[database] getProfileById error:', error.message);
+      return null;
+    }
+
+    return data as Profile;
+  } catch (err) {
+    console.error('[database] getProfileById unexpected error:', err);
     return null;
   }
-
-  return data;
 }
 
 /**
- * Fetch a single profile by username (case-sensitive).
- * Returns null if not found or on error.
+ * Fetch a single profile by username.
+ * Returns null if not found or if RLS blocks access.
  */
 export async function getProfileByUsername(username: string): Promise<Profile | null> {
-  const { data, error } = await db
-    .from('profiles')
-    .select('*')
-    .eq('username', username)
-    .single();
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('username', username)
+      .single();
 
-  if (error) {
-    console.error('[getProfileByUsername]', error.message);
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Row not found
+      console.error('[database] getProfileByUsername error:', error.message);
+      return null;
+    }
+
+    return data as Profile;
+  } catch (err) {
+    console.error('[database] getProfileByUsername unexpected error:', err);
     return null;
   }
-
-  return data;
 }
 
 /**
- * Update a profile row for the given user ID.
- * Returns the updated profile or null on error.
- * Requires the user to be authenticated as the profile owner (enforced by RLS).
+ * Apply a partial update to a profile row.
+ * Only the authenticated user can update their own profile (enforced by RLS).
+ * Returns the updated profile or null on failure.
  */
 export async function updateProfile(
-  userId: string,
+  id: string,
   updates: ProfileUpdate
 ): Promise<Profile | null> {
-  const { data, error } = await db
-    .from('profiles')
-    .update(updates)
-    .eq('id', userId)
-    .select()
-    .single();
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', id)
+      .select('*')
+      .single();
 
-  if (error) {
-    console.error('[updateProfile]', error.message);
+    if (error) {
+      console.error('[database] updateProfile error:', error.message);
+      return null;
+    }
+
+    return data as Profile;
+  } catch (err) {
+    console.error('[database] updateProfile unexpected error:', err);
     return null;
   }
-
-  return data;
 }
 
 // ============================================================
-// Favorite games helpers
+// GAMING PREFERENCES
 // ============================================================
 
 /**
- * Fetch all favorite games for a user, with the full game record joined.
- * Returns an empty array on error.
+ * Fetch gaming preferences for a given user.
+ * Returns null if not found or if the profile is private and
+ * the caller is not the owner (enforced by RLS).
  */
-export async function getUserFavoriteGames(
+export async function getGamingPreferences(
   userId: string
-): Promise<(UserFavoriteGame & { game: Game })[]> {
-  const { data, error } = await db
-    .from('user_favorite_games')
-    .select(`
-      id,
-      user_id,
-      game_id,
-      created_at,
-      game:games (*)
-    `)
-    .eq('user_id', userId);
+): Promise<GamingPreferences | null> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('gaming_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
 
-  if (error) {
-    console.error('[getUserFavoriteGames]', error.message);
-    return [];
-  }
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Row not found
+      console.error('[database] getGamingPreferences error:', error.message);
+      return null;
+    }
 
-  // Supabase returns the joined relation as an object; cast to expected type.
-  return (data ?? []) as unknown as (UserFavoriteGame & { game: Game })[];
-}
-
-/**
- * Add a game to a user's favorites.
- * Returns the new row or null on error (e.g. duplicate).
- */
-export async function addFavoriteGame(
-  userId: string,
-  gameId: string
-): Promise<UserFavoriteGame | null> {
-  const { data, error } = await db
-    .from('user_favorite_games')
-    .insert({ user_id: userId, game_id: gameId })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('[addFavoriteGame]', error.message);
+    return data as GamingPreferences;
+  } catch (err) {
+    console.error('[database] getGamingPreferences unexpected error:', err);
     return null;
   }
-
-  return data;
 }
 
 /**
- * Remove a game from a user's favorites.
- * Silently logs errors but does not throw.
+ * Upsert gaming preferences for the authenticated user.
+ * Uses user_id as the conflict key. Creates a new row if none
+ * exists, or updates the existing one.
+ * Returns the resulting row or null on failure.
  */
-export async function removeFavoriteGame(userId: string, gameId: string): Promise<void> {
-  const { error } = await db
-    .from('user_favorite_games')
-    .delete()
-    .eq('user_id', userId)
-    .eq('game_id', gameId);
-
-  if (error) {
-    console.error('[removeFavoriteGame]', error.message);
-  }
-}
-
-// ============================================================
-// Availability helpers
-// ============================================================
-
-/**
- * Fetch all availability windows for a user, ordered by day.
- * Returns an empty array on error.
- */
-export async function getUserAvailability(userId: string): Promise<UserAvailability[]> {
-  const { data, error } = await db
-    .from('user_availability')
-    .select('*')
-    .eq('user_id', userId)
-    .order('day_of_week');
-
-  if (error) {
-    console.error('[getUserAvailability]', error.message);
-    return [];
-  }
-
-  return data ?? [];
-}
-
-/**
- * Upsert a set of availability windows for a user.
- * Uses conflict resolution on (user_id, day_of_week, start_time) to update
- * existing slots or insert new ones.
- * Returns the resulting rows or an empty array on error.
- */
-export async function upsertAvailability(
+export async function upsertGamingPreferences(
   userId: string,
-  availability: UserAvailabilityInsert[]
-): Promise<UserAvailability[]> {
-  // Ensure all rows carry the correct user_id
-  const rows = availability.map((slot) => ({ ...slot, user_id: userId }));
+  prefs: GamingPreferencesUpdate
+): Promise<GamingPreferences | null> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('gaming_preferences')
+      .upsert(
+        { ...prefs, user_id: userId },
+        { onConflict: 'user_id' }
+      )
+      .select('*')
+      .single();
 
-  const { data, error } = await db
-    .from('user_availability')
-    .upsert(rows, { onConflict: 'user_id,day_of_week,start_time' })
-    .select();
+    if (error) {
+      console.error('[database] upsertGamingPreferences error:', error.message);
+      return null;
+    }
 
-  if (error) {
-    console.error('[upsertAvailability]', error.message);
-    return [];
+    return data as GamingPreferences;
+  } catch (err) {
+    console.error('[database] upsertGamingPreferences unexpected error:', err);
+    return null;
   }
-
-  return data ?? [];
 }
 
 // ============================================================
-// Game collection helpers
+// GAME COLLECTIONS
 // ============================================================
 
 /**
- * Fetch a user's entire game collection with full game details joined.
- * Returns an empty array on error.
+ * Fetch a user's game collection, optionally filtered by type.
+ * Returns an empty array if not found, access is denied, or
+ * the collection is empty.
+ *
+ * @param userId  The profile UUID to fetch the collection for.
+ * @param type    Optional CollectionType filter ('owned', 'wishlist', etc.)
  */
 export async function getGameCollection(
-  userId: string
-): Promise<(GameCollection & { game: Game })[]> {
-  const { data, error } = await db
-    .from('game_collections')
-    .select(`
-      id,
-      user_id,
-      game_id,
-      status,
-      notes,
-      created_at,
-      updated_at,
-      game:games (*)
-    `)
-    .eq('user_id', userId);
+  userId: string,
+  type?: CollectionType
+): Promise<GameCollection[]> {
+  try {
+    const supabase = createServerSupabaseClient();
+    let query = supabase
+      .from('game_collections')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('[getGameCollection]', error.message);
+    if (type) {
+      query = query.eq('collection_type', type);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('[database] getGameCollection error:', error.message);
+      return [];
+    }
+
+    return (data ?? []) as GameCollection[];
+  } catch (err) {
+    console.error('[database] getGameCollection unexpected error:', err);
     return [];
   }
-
-  return (data ?? []) as unknown as (GameCollection & { game: Game })[];
-}
-
-// ============================================================
-// Rating helpers
-// ============================================================
-
-/**
- * Fetch all ratings received by a user.
- * Returns an empty array on error.
- */
-export async function getUserRatings(userId: string): Promise<UserRating[]> {
-  const { data, error } = await db
-    .from('user_ratings')
-    .select('*')
-    .eq('rated_user_id', userId);
-
-  if (error) {
-    console.error('[getUserRatings]', error.message);
-    return [];
-  }
-
-  return data ?? [];
 }
 
 /**
- * Calculate the average rating for a user.
- * Uses Supabase's aggregate select to avoid fetching all rows.
- * Returns null if the user has no ratings or on error.
+ * Add a game to a user's collection.
+ * The user_id in the item must match the authenticated user (RLS).
+ * Returns the created row or null on failure.
  */
-export async function getAverageRating(userId: string): Promise<number | null> {
-  // Supabase does not support SQL AVG() directly via the JS client;
-  // we fetch all ratings and compute the average in JS instead.
-  const { data, error } = await db
-    .from('user_ratings')
-    .select('rating')
-    .eq('rated_user_id', userId);
+export async function addToCollection(
+  item: GameCollectionInsert
+): Promise<GameCollection | null> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('game_collections')
+      .insert(item)
+      .select('*')
+      .single();
 
-  if (error) {
-    console.error('[getAverageRating]', error.message);
+    if (error) {
+      console.error('[database] addToCollection error:', error.message);
+      return null;
+    }
+
+    return data as GameCollection;
+  } catch (err) {
+    console.error('[database] addToCollection unexpected error:', err);
     return null;
   }
+}
 
-  if (!data || data.length === 0) return null;
+/**
+ * Update an existing game collection entry.
+ * The userId guard is in addition to RLS for defence-in-depth.
+ * Returns the updated row or null on failure.
+ */
+export async function updateCollectionItem(
+  id: string,
+  userId: string,
+  updates: GameCollectionUpdate
+): Promise<GameCollection | null> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('game_collections')
+      .update(updates)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('*')
+      .single();
 
-  const sum = data.reduce((acc, row) => acc + row.rating, 0);
-  return sum / data.length;
+    if (error) {
+      console.error('[database] updateCollectionItem error:', error.message);
+      return null;
+    }
+
+    return data as GameCollection;
+  } catch (err) {
+    console.error('[database] updateCollectionItem unexpected error:', err);
+    return null;
+  }
+}
+
+/**
+ * Remove a game from a user's collection.
+ * The userId check is applied in addition to RLS.
+ * Returns true if a row was deleted, false otherwise.
+ */
+export async function removeFromCollection(
+  id: string,
+  userId: string
+): Promise<boolean> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { error, count } = await supabase
+      .from('game_collections')
+      .delete({ count: 'exact' })
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('[database] removeFromCollection error:', error.message);
+      return false;
+    }
+
+    return (count ?? 0) > 0;
+  } catch (err) {
+    console.error('[database] removeFromCollection unexpected error:', err);
+    return false;
+  }
 }
 
 // ============================================================
-// Game search helpers
+// PLAYER RATINGS
 // ============================================================
 
 /**
- * Full-text search for games by name.
- * Uses case-insensitive ILIKE for broad matching.
- * Returns an empty array on error or no results.
+ * Fetch all ratings received by a given user.
+ * Results are ordered most-recent first.
+ * Returns an empty array on error or if no ratings exist.
  */
-export async function searchGames(query: string): Promise<Game[]> {
-  if (!query.trim()) return [];
+export async function getPlayerRatings(userId: string): Promise<PlayerRating[]> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('player_ratings')
+      .select('*')
+      .eq('rated_id', userId)
+      .order('created_at', { ascending: false });
 
-  const { data, error } = await db
-    .from('games')
-    .select('*')
-    .ilike('name', `%${query.trim()}%`)
-    .order('name')
-    .limit(50);
+    if (error) {
+      console.error('[database] getPlayerRatings error:', error.message);
+      return [];
+    }
 
-  if (error) {
-    console.error('[searchGames]', error.message);
+    return (data ?? []) as PlayerRating[];
+  } catch (err) {
+    console.error('[database] getPlayerRatings unexpected error:', err);
     return [];
   }
+}
 
-  return data ?? [];
+/**
+ * Insert or update a player rating.
+ * Conflicts on (rater_id, rated_id) — each pair can have only
+ * one rating; submitting again updates the existing one.
+ * Returns the resulting row or null on failure.
+ */
+export async function upsertPlayerRating(
+  rating: PlayerRatingInsert
+): Promise<PlayerRating | null> {
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from('player_ratings')
+      .upsert(rating, { onConflict: 'rater_id,rated_id' })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[database] upsertPlayerRating error:', error.message);
+      return null;
+    }
+
+    return data as PlayerRating;
+  } catch (err) {
+    console.error('[database] upsertPlayerRating unexpected error:', err);
+    return null;
+  }
+}
+
+// ============================================================
+// COMPOSITE / FULL PROFILE
+// ============================================================
+
+/**
+ * Fetch a fully-hydrated profile including preferences,
+ * game collection, received ratings, and computed average rating.
+ *
+ * Runs all sub-queries in parallel for performance.
+ * Returns null if the profile does not exist or is inaccessible.
+ */
+export async function getProfileFull(id: string): Promise<ProfileFull | null> {
+  try {
+    // Run all queries concurrently
+    const [profile, preferences, collections, ratings] = await Promise.all([
+      getProfileById(id),
+      getGamingPreferences(id),
+      getGameCollection(id),
+      getPlayerRatings(id),
+    ]);
+
+    // If the profile itself is inaccessible, return null
+    if (!profile) {
+      return null;
+    }
+
+    // Compute average rating from all received ratings
+    let average_rating: number | null = null;
+    if (ratings.length > 0) {
+      const sum = ratings.reduce((acc, r) => acc + r.rating, 0);
+      // Round to one decimal place for display
+      average_rating = Math.round((sum / ratings.length) * 10) / 10;
+    }
+
+    return {
+      ...profile,
+      gaming_preferences: preferences,
+      game_collections: collections,
+      received_ratings: ratings,
+      average_rating,
+    };
+  } catch (err) {
+    console.error('[database] getProfileFull unexpected error:', err);
+    return null;
+  }
 }

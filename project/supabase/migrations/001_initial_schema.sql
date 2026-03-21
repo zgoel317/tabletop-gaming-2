@@ -1,350 +1,272 @@
--- Migration: 001_initial_schema.sql
--- Description: Creates all core tables, enums, indexes, constraints, and triggers
--- for the Tabletop Gaming Networking App MVP
-
--- ============================================================
--- ENUMS
--- ============================================================
-
-CREATE TYPE experience_level AS ENUM (
-  'beginner',
-  'intermediate',
-  'advanced',
-  'expert'
-);
-
-CREATE TYPE player_count_preference AS ENUM (
-  'solo',
-  'small_group',
-  'medium_group',
-  'large_group'
-);
-
-CREATE TYPE availability_day AS ENUM (
-  'monday',
-  'tuesday',
-  'wednesday',
-  'thursday',
-  'friday',
-  'saturday',
-  'sunday'
-);
-
-CREATE TYPE game_collection_status AS ENUM (
-  'owned',
-  'wishlist',
-  'previously_owned'
-);
-
-CREATE TYPE session_status AS ENUM (
-  'scheduled',
-  'cancelled',
-  'completed'
-);
-
-CREATE TYPE rsvp_status AS ENUM (
-  'going',
-  'maybe',
-  'not_going',
-  'waitlisted'
-);
-
-CREATE TYPE group_role AS ENUM (
-  'organizer',
-  'moderator',
-  'member'
-);
-
-CREATE TYPE message_type AS ENUM (
-  'direct',
-  'group',
-  'event'
-);
-
--- ============================================================
--- TABLE: profiles
--- Extends Supabase auth.users with app-specific profile data
--- ============================================================
-
-CREATE TABLE profiles (
-  id                   UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  username             TEXT UNIQUE NOT NULL,
-  display_name         TEXT NOT NULL,
-  bio                  TEXT,
-  avatar_url           TEXT,
-  location_name        TEXT,
-  latitude             DECIMAL(9,6),
-  longitude            DECIMAL(9,6),
-  is_location_public   BOOLEAN DEFAULT true,
-  experience_level     experience_level DEFAULT 'beginner',
-  is_looking_for_group BOOLEAN DEFAULT false,
-  created_at           TIMESTAMPTZ DEFAULT NOW(),
-  updated_at           TIMESTAMPTZ DEFAULT NOW(),
-
-  CONSTRAINT username_format CHECK (username ~ '^[a-zA-Z0-9_]{3,30}$'),
-  CONSTRAINT bio_length CHECK (char_length(bio) <= 500)
-);
-
-COMMENT ON TABLE profiles IS 'User profile data extending Supabase auth.users';
-COMMENT ON COLUMN profiles.username IS 'Unique username (3-30 chars, alphanumeric + underscore)';
-COMMENT ON COLUMN profiles.location_name IS 'Human-readable location string (city, region, etc.)';
-COMMENT ON COLUMN profiles.is_looking_for_group IS 'Whether the user is actively seeking a gaming group';
-
--- ============================================================
--- TABLE: game_genres
--- Lookup table for board game genres/categories
--- ============================================================
-
-CREATE TABLE game_genres (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name        TEXT UNIQUE NOT NULL,
-  description TEXT,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-
-COMMENT ON TABLE game_genres IS 'Lookup table for board game genres and categories';
-
--- ============================================================
--- TABLE: games
--- Game catalog with BoardGameGeek integration support
--- ============================================================
-
-CREATE TABLE games (
-  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bgg_id                   INTEGER UNIQUE,
-  name                     TEXT NOT NULL,
-  description              TEXT,
-  min_players              INTEGER,
-  max_players              INTEGER,
-  average_playtime_minutes INTEGER,
-  image_url                TEXT,
-  thumbnail_url            TEXT,
-  year_published           INTEGER,
-  created_at               TIMESTAMPTZ DEFAULT NOW(),
-  updated_at               TIMESTAMPTZ DEFAULT NOW()
-);
-
-COMMENT ON TABLE games IS 'Board game catalog, optionally synced with BoardGameGeek API';
-COMMENT ON COLUMN games.bgg_id IS 'BoardGameGeek numeric ID for API synchronization';
-
--- ============================================================
--- TABLE: game_genre_mappings
--- Join table linking games to their genres (many-to-many)
--- ============================================================
-
-CREATE TABLE game_genre_mappings (
-  game_id  UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  genre_id UUID NOT NULL REFERENCES game_genres(id) ON DELETE CASCADE,
-
-  PRIMARY KEY (game_id, genre_id)
-);
-
-COMMENT ON TABLE game_genre_mappings IS 'Many-to-many relationship between games and genres';
-
--- ============================================================
--- TABLE: user_favorite_games
--- Games that users have marked as favorites
--- ============================================================
-
-CREATE TABLE user_favorite_games (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  game_id    UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-
-  UNIQUE (user_id, game_id)
-);
-
-COMMENT ON TABLE user_favorite_games IS 'Games marked as favorites by users';
-
--- ============================================================
--- TABLE: user_favorite_genres
--- Game genres that users prefer
--- ============================================================
-
-CREATE TABLE user_favorite_genres (
-  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id  UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  genre_id UUID NOT NULL REFERENCES game_genres(id) ON DELETE CASCADE,
-
-  UNIQUE (user_id, genre_id)
-);
-
-COMMENT ON TABLE user_favorite_genres IS 'Game genres preferred by users';
-
--- ============================================================
--- TABLE: user_availability
--- Weekly recurring availability windows for each user
--- ============================================================
-
-CREATE TABLE user_availability (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  day_of_week availability_day NOT NULL,
-  start_time  TIME NOT NULL,
-  end_time    TIME NOT NULL,
-  created_at  TIMESTAMPTZ DEFAULT NOW(),
-
-  UNIQUE (user_id, day_of_week, start_time),
-  CONSTRAINT end_after_start CHECK (end_time > start_time)
-);
-
-COMMENT ON TABLE user_availability IS 'User weekly recurring availability for gaming sessions';
-
--- ============================================================
--- TABLE: game_collections
--- Games in a user's personal collection (owned, wishlist, etc.)
--- ============================================================
-
-CREATE TABLE game_collections (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  game_id    UUID NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-  status     game_collection_status NOT NULL DEFAULT 'owned',
-  notes      TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-
-  UNIQUE (user_id, game_id, status)
-);
-
-COMMENT ON TABLE game_collections IS 'User game collections including owned, wishlist, and previously owned';
-
--- ============================================================
--- TABLE: user_ratings
--- Player-to-player ratings and reviews
--- ============================================================
-
-CREATE TABLE user_ratings (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  rater_id      UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  rated_user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  rating        INTEGER NOT NULL,
-  review        TEXT,
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ DEFAULT NOW(),
-
-  UNIQUE (rater_id, rated_user_id),
-  CONSTRAINT rating_range CHECK (rating >= 1 AND rating <= 5),
-  CONSTRAINT no_self_rating CHECK (rater_id != rated_user_id)
-);
-
-COMMENT ON TABLE user_ratings IS 'Player ratings and reviews between users after gaming sessions';
-
--- ============================================================
--- INDEXES
--- ============================================================
-
--- Profile lookup and discovery indexes
-CREATE INDEX idx_profiles_username
-  ON profiles(username);
-
-CREATE INDEX idx_profiles_location
-  ON profiles(latitude, longitude)
-  WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
-
-CREATE INDEX idx_profiles_lfg
-  ON profiles(is_looking_for_group)
-  WHERE is_looking_for_group = true;
-
--- Game lookup indexes
-CREATE INDEX idx_games_bgg_id
-  ON games(bgg_id);
-
-CREATE INDEX idx_games_name
-  ON games USING gin(to_tsvector('english', name));
-
--- User favorites indexes
-CREATE INDEX idx_user_favorite_games_user_id
-  ON user_favorite_games(user_id);
-
--- Game collection indexes
-CREATE INDEX idx_game_collections_user_id
-  ON game_collections(user_id);
-
--- Rating indexes
-CREATE INDEX idx_user_ratings_rated_user
-  ON user_ratings(rated_user_id);
+-- Migration: 001_initial_schema
+-- Description: Creates core tables for the Tabletop Gaming Networking App
+-- Tables: profiles, gaming_preferences, game_collections, player_ratings
+-- Includes RLS policies and trigger functions
 
 -- ============================================================
 -- TRIGGER FUNCTION: handle_updated_at
--- Automatically updates the updated_at timestamp on row changes
+-- Automatically updates the updated_at timestamp on row update
 -- ============================================================
-
 CREATE OR REPLACE FUNCTION handle_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW.updated_at = NOW();
+  NEW.updated_at = now();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION handle_updated_at() IS 'Trigger function to auto-update updated_at timestamp';
+-- ============================================================
+-- TABLE: profiles
+-- Extends auth.users with public-facing profile information
+-- ============================================================
+CREATE TABLE IF NOT EXISTS profiles (
+  id                UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username          TEXT UNIQUE NOT NULL,
+  full_name         TEXT,
+  bio               TEXT,
+  avatar_url        TEXT,
+  location_city     TEXT,
+  location_state    TEXT,
+  location_country  TEXT DEFAULT 'US',
+  location_lat      DECIMAL(9,6),
+  location_lng      DECIMAL(9,6),
+  is_public         BOOLEAN DEFAULT true,
+  created_at        TIMESTAMPTZ DEFAULT now(),
+  updated_at        TIMESTAMPTZ DEFAULT now()
+);
 
--- Apply updated_at trigger to all relevant tables
+-- ============================================================
+-- TABLE: gaming_preferences
+-- Stores per-user gaming preferences and availability info
+-- ============================================================
+CREATE TABLE IF NOT EXISTS gaming_preferences (
+  id                              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                         UUID UNIQUE NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  experience_level                TEXT CHECK (experience_level IN ('beginner', 'intermediate', 'advanced', 'expert')) DEFAULT 'beginner',
+  preferred_genres                TEXT[] DEFAULT '{}',
+  favorite_games                  TEXT[] DEFAULT '{}',
+  preferred_player_count_min      INT DEFAULT 2,
+  preferred_player_count_max      INT DEFAULT 6,
+  preferred_session_length_hours  DECIMAL(4,1),
+  availability_notes              TEXT,
+  willing_to_teach                BOOLEAN DEFAULT false,
+  willing_to_travel_miles         INT DEFAULT 10,
+  created_at                      TIMESTAMPTZ DEFAULT now(),
+  updated_at                      TIMESTAMPTZ DEFAULT now()
+);
 
-CREATE TRIGGER trg_profiles_updated_at
+-- ============================================================
+-- TABLE: game_collections
+-- Tracks games a user owns, wants, has played, or is selling
+-- ============================================================
+CREATE TABLE IF NOT EXISTS game_collections (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  bgg_game_id      INT,
+  game_name        TEXT NOT NULL,
+  game_image_url   TEXT,
+  collection_type  TEXT CHECK (collection_type IN ('owned', 'wishlist', 'played', 'selling')) NOT NULL,
+  user_rating      INT CHECK (user_rating BETWEEN 1 AND 10),
+  notes            TEXT,
+  created_at       TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, bgg_game_id, collection_type)
+);
+
+-- ============================================================
+-- TABLE: player_ratings
+-- Stores ratings and reviews users give each other
+-- ============================================================
+CREATE TABLE IF NOT EXISTS player_ratings (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  rater_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  rated_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  rating       INT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  review_text  TEXT,
+  session_id   UUID,  -- nullable; will reference future events table
+  created_at   TIMESTAMPTZ DEFAULT now(),
+  updated_at   TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(rater_id, rated_id),
+  CHECK (rater_id != rated_id)
+);
+
+-- ============================================================
+-- UPDATED_AT TRIGGERS
+-- Automatically maintain the updated_at column on mutations
+-- ============================================================
+CREATE TRIGGER profiles_updated_at
   BEFORE UPDATE ON profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION handle_updated_at();
+  FOR EACH ROW EXECUTE FUNCTION handle_updated_at();
 
-CREATE TRIGGER trg_games_updated_at
-  BEFORE UPDATE ON games
-  FOR EACH ROW
-  EXECUTE FUNCTION handle_updated_at();
+CREATE TRIGGER gaming_preferences_updated_at
+  BEFORE UPDATE ON gaming_preferences
+  FOR EACH ROW EXECUTE FUNCTION handle_updated_at();
 
-CREATE TRIGGER trg_game_collections_updated_at
-  BEFORE UPDATE ON game_collections
-  FOR EACH ROW
-  EXECUTE FUNCTION handle_updated_at();
-
-CREATE TRIGGER trg_user_ratings_updated_at
-  BEFORE UPDATE ON user_ratings
-  FOR EACH ROW
-  EXECUTE FUNCTION handle_updated_at();
+CREATE TRIGGER player_ratings_updated_at
+  BEFORE UPDATE ON player_ratings
+  FOR EACH ROW EXECUTE FUNCTION handle_updated_at();
 
 -- ============================================================
 -- TRIGGER FUNCTION: handle_new_user
--- Automatically creates a profile row when a new auth user signs up.
+-- Auto-creates a profile and default gaming_preferences row
+-- when a new user signs up via Supabase Auth.
 --
--- NOTE: When calling supabase.auth.signUp() from the frontend,
--- pass the following in the options.data object to pre-populate
--- the profile:
---   {
---     username: 'desired_username',
---     display_name: 'Full Name',
---     avatar_url: 'https://...'
---   }
--- If not provided, a placeholder username is generated from the
--- user's UUID and the email is used as display_name.
+-- NOTE FOR DEVELOPERS: Because this trigger runs on auth.users
+-- INSERT, the frontend should NOT manually insert into profiles
+-- after signup. Instead, call updateProfile() to fill optional
+-- fields after the user completes onboarding.
 -- ============================================================
-
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  base_username TEXT;
+  final_username TEXT;
+  counter        INT := 0;
 BEGIN
-  INSERT INTO public.profiles (id, username, display_name, avatar_url)
+  -- Derive a base username from the email address (part before @)
+  base_username := LOWER(SPLIT_PART(NEW.email, '@', 1));
+  -- Remove any characters that are not alphanumeric or underscores
+  base_username := REGEXP_REPLACE(base_username, '[^a-z0-9_]', '_', 'g');
+  -- Truncate to 30 characters to leave room for numeric suffix
+  base_username := LEFT(base_username, 30);
+  final_username := base_username;
+
+  -- Ensure uniqueness by appending an incrementing counter if needed
+  WHILE EXISTS (SELECT 1 FROM profiles WHERE username = final_username) LOOP
+    counter := counter + 1;
+    final_username := base_username || '_' || counter::TEXT;
+  END LOOP;
+
+  -- Insert the base profile record
+  INSERT INTO profiles (id, username, full_name, avatar_url)
   VALUES (
     NEW.id,
-    COALESCE(
-      NEW.raw_user_meta_data->>'username',
-      'user_' || LEFT(NEW.id::TEXT, 8)
-    ),
-    COALESCE(
-      NEW.raw_user_meta_data->>'display_name',
-      NEW.email
-    ),
+    final_username,
+    NEW.raw_user_meta_data->>'full_name',
     NEW.raw_user_meta_data->>'avatar_url'
   );
+
+  -- Insert default gaming preferences for the new user
+  INSERT INTO gaming_preferences (user_id)
+  VALUES (NEW.id);
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-COMMENT ON FUNCTION handle_new_user() IS
-  'Trigger function that auto-creates a profile row when a new Supabase Auth user is created. '
-  'Uses SECURITY DEFINER to bypass RLS since the user session does not exist yet at trigger time.';
-
--- Attach handle_new_user to auth.users inserts
-CREATE TRIGGER on_auth_user_created
+-- Attach the new-user trigger to auth.users
+CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION handle_new_user();
+  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- ============================================================
+-- ROW LEVEL SECURITY
+-- Enable RLS on all tables before defining policies
+-- ============================================================
+ALTER TABLE profiles         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gaming_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE game_collections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE player_ratings   ENABLE ROW LEVEL SECURITY;
+
+-- ------------------------------------------------------------
+-- RLS POLICIES: profiles
+-- ------------------------------------------------------------
+
+-- Anyone can view public profiles; users can always view their own
+CREATE POLICY "Public profiles are viewable by everyone"
+  ON profiles FOR SELECT
+  USING (is_public = true OR auth.uid() = id);
+
+-- Users can only insert their own profile row
+CREATE POLICY "Users can insert their own profile"
+  ON profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
+-- Users can only update their own profile row
+CREATE POLICY "Users can update own profile"
+  ON profiles FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
+-- ------------------------------------------------------------
+-- RLS POLICIES: gaming_preferences
+-- ------------------------------------------------------------
+
+-- Users can view their own preferences; others can view if profile is public
+CREATE POLICY "Gaming preferences viewable based on profile visibility"
+  ON gaming_preferences FOR SELECT
+  USING (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = gaming_preferences.user_id
+        AND profiles.is_public = true
+    )
+  );
+
+-- Users can only insert their own preferences
+CREATE POLICY "Users can insert own gaming preferences"
+  ON gaming_preferences FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+-- Users can only update their own preferences
+CREATE POLICY "Users can update own gaming preferences"
+  ON gaming_preferences FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+-- RLS POLICIES: game_collections
+-- ------------------------------------------------------------
+
+-- Users can view their own collection; others can view if profile is public
+CREATE POLICY "Game collections viewable based on profile visibility"
+  ON game_collections FOR SELECT
+  USING (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = game_collections.user_id
+        AND profiles.is_public = true
+    )
+  );
+
+-- Users can only insert into their own collection
+CREATE POLICY "Users can insert into own collection"
+  ON game_collections FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+-- Users can only update their own collection entries
+CREATE POLICY "Users can update own collection"
+  ON game_collections FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Users can only delete their own collection entries
+CREATE POLICY "Users can delete from own collection"
+  ON game_collections FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- ------------------------------------------------------------
+-- RLS POLICIES: player_ratings
+-- ------------------------------------------------------------
+
+-- All authenticated users can view ratings (transparency in the community)
+CREATE POLICY "Authenticated users can view ratings"
+  ON player_ratings FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+-- Users can only insert ratings where they are the rater
+CREATE POLICY "Users can insert ratings they give"
+  ON player_ratings FOR INSERT
+  WITH CHECK (auth.uid() = rater_id);
+
+-- Users can only update ratings they originally gave
+CREATE POLICY "Users can update ratings they gave"
+  ON player_ratings FOR UPDATE
+  USING (auth.uid() = rater_id)
+  WITH CHECK (auth.uid() = rater_id);
+
+-- Users can only delete ratings they originally gave
+CREATE POLICY "Users can delete ratings they gave"
+  ON player_ratings FOR DELETE
+  USING (auth.uid() = rater_id);

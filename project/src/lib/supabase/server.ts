@@ -2,18 +2,15 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import type { Database } from '@/types/database';
 
-/**
- * Server-side Supabase client factory, typed with the full Database schema.
- *
- * Call this function inside Server Components, Server Actions, and Route
- * Handlers. A new client is created per request so that cookies (and
- * therefore the user session) are correctly scoped.
- *
- * Example:
- *   const supabase = createSupabaseServerClient();
- *   const { data: { user } } = await supabase.auth.getUser();
- */
-export function createSupabaseServerClient() {
+// Typed server-side Supabase client factory.
+// Uses the user's session cookie so all queries respect RLS.
+// Call this inside Server Components, Route Handlers, and
+// Server Actions — never in client components.
+//
+// NOTE: This uses the anon key (not the service role key).
+// The anon key + user session cookie is the correct pattern
+// for server-side code that should obey RLS policies.
+export function createServerSupabaseClient() {
   const cookieStore = cookies();
 
   return createServerClient<Database>(
@@ -28,15 +25,16 @@ export function createSupabaseServerClient() {
           try {
             cookieStore.set({ name, value, ...options });
           } catch {
-            // set() can throw in read-only Server Component contexts;
-            // the middleware is responsible for refreshing the session.
+            // The `set` method is called from a Server Component.
+            // This can be ignored if middleware is refreshing sessions.
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value: '', ...options });
           } catch {
-            // Same as above — safe to ignore in read-only contexts.
+            // The `remove` method is called from a Server Component.
+            // This can be ignored if middleware is refreshing sessions.
           }
         },
       },

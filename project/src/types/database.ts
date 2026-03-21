@@ -1,289 +1,164 @@
 // ============================================================
-// Database Types — Auto-mirrors the Supabase schema
-// Provides end-to-end type safety for all database interactions
+// Database Types — Tabletop Gaming Networking App
 //
-// Import pattern:
-//   import type { Database, Profile, Game } from '@/types/database';
+// These types mirror the Supabase PostgreSQL schema defined in
+// supabase/migrations/001_initial_schema.sql
+//
+// Keep these in sync with the actual schema. Alternatively,
+// run `npm run db:types` to auto-generate from a live schema
+// and compare against this file.
 // ============================================================
 
-// ============================================================
-// ENUMS
-// ============================================================
+// ------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------
 
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | 'expert';
 
-export type PlayerCountPreference = 'solo' | 'small_group' | 'medium_group' | 'large_group';
+export type CollectionType = 'owned' | 'wishlist' | 'played' | 'selling';
 
-export type AvailabilityDay =
-  | 'monday'
-  | 'tuesday'
-  | 'wednesday'
-  | 'thursday'
-  | 'friday'
-  | 'saturday'
-  | 'sunday';
-
-export type GameCollectionStatus = 'owned' | 'wishlist' | 'previously_owned';
-
-export type SessionStatus = 'scheduled' | 'cancelled' | 'completed';
-
-export type RsvpStatus = 'going' | 'maybe' | 'not_going' | 'waitlisted';
-
-export type GroupRole = 'organizer' | 'moderator' | 'member';
-
-export type MessageType = 'direct' | 'group' | 'event';
-
-// ============================================================
-// ROW TYPES — match database column names exactly (snake_case)
-// ============================================================
+// ------------------------------------------------------------
+// Table Row Types (snake_case matching DB columns)
+// ------------------------------------------------------------
 
 export interface Profile {
   id: string;
   username: string;
-  display_name: string;
+  full_name: string | null;
   bio: string | null;
   avatar_url: string | null;
-  location_name: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  is_location_public: boolean;
+  location_city: string | null;
+  location_state: string | null;
+  location_country: string;
+  location_lat: number | null;
+  location_lng: number | null;
+  is_public: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GamingPreferences {
+  id: string;
+  user_id: string;
   experience_level: ExperienceLevel;
-  is_looking_for_group: boolean;
+  preferred_genres: string[];
+  favorite_games: string[];
+  preferred_player_count_min: number;
+  preferred_player_count_max: number;
+  preferred_session_length_hours: number | null;
+  availability_notes: string | null;
+  willing_to_teach: boolean;
+  willing_to_travel_miles: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface Game {
-  id: string;
-  bgg_id: number | null;
-  name: string;
-  description: string | null;
-  min_players: number | null;
-  max_players: number | null;
-  average_playtime_minutes: number | null;
-  image_url: string | null;
-  thumbnail_url: string | null;
-  year_published: number | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface GameGenre {
-  id: string;
-  name: string;
-  description: string | null;
-  created_at: string;
-}
-
-export interface GameGenreMapping {
-  game_id: string;
-  genre_id: string;
-}
-
-export interface UserFavoriteGame {
-  id: string;
-  user_id: string;
-  game_id: string;
-  created_at: string;
-}
-
-export interface UserFavoriteGenre {
-  id: string;
-  user_id: string;
-  genre_id: string;
-}
-
-export interface UserAvailability {
-  id: string;
-  user_id: string;
-  day_of_week: AvailabilityDay;
-  start_time: string; // TIME columns returned as "HH:MM:SS" strings
-  end_time: string;
-  created_at: string;
 }
 
 export interface GameCollection {
   id: string;
   user_id: string;
-  game_id: string;
-  status: GameCollectionStatus;
+  bgg_game_id: number | null;
+  game_name: string;
+  game_image_url: string | null;
+  collection_type: CollectionType;
+  user_rating: number | null;
   notes: string | null;
   created_at: string;
-  updated_at: string;
 }
 
-export interface UserRating {
+export interface PlayerRating {
   id: string;
   rater_id: string;
-  rated_user_id: string;
+  rated_id: string;
   rating: number;
-  review: string | null;
+  review_text: string | null;
+  session_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-// ============================================================
-// INSERT TYPES
-// id, created_at, updated_at are omitted (DB-generated).
-// Optional fields use `?` to match nullable / defaulted columns.
-// ============================================================
+// ------------------------------------------------------------
+// Insert Types
+// Omit auto-generated fields (id, created_at, updated_at)
+// The consuming code provides only the user-supplied fields.
+// ------------------------------------------------------------
 
-export interface ProfileInsert {
-  id: string; // Must match auth.users.id
-  username: string;
-  display_name: string;
-  bio?: string | null;
-  avatar_url?: string | null;
-  location_name?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  is_location_public?: boolean;
-  experience_level?: ExperienceLevel;
-  is_looking_for_group?: boolean;
+export type ProfileInsert = Omit<Profile, 'id' | 'created_at' | 'updated_at'>;
+
+export type GamingPreferencesInsert = Omit<GamingPreferences, 'id' | 'created_at' | 'updated_at'>;
+
+export type GameCollectionInsert = Omit<GameCollection, 'id' | 'created_at'>;
+
+export type PlayerRatingInsert = Omit<PlayerRating, 'id' | 'created_at' | 'updated_at'>;
+
+// ------------------------------------------------------------
+// Update Types
+// All fields optional; primary keys and owner ids are excluded
+// since they should never change after creation.
+// ------------------------------------------------------------
+
+export type ProfileUpdate = Partial<ProfileInsert>;
+
+/** user_id cannot be changed after creation */
+export type GamingPreferencesUpdate = Partial<Omit<GamingPreferencesInsert, 'user_id'>>;
+
+/** user_id cannot be changed after creation */
+export type GameCollectionUpdate = Partial<Omit<GameCollectionInsert, 'user_id'>>;
+
+/** rater_id and rated_id are immutable after creation */
+export type PlayerRatingUpdate = Partial<Omit<PlayerRatingInsert, 'rater_id' | 'rated_id'>>;
+
+// ------------------------------------------------------------
+// Joined / Enriched Types Used in UI
+// ------------------------------------------------------------
+
+/** Profile with gaming preferences — used in player search results */
+export interface ProfileWithPreferences extends Profile {
+  gaming_preferences: GamingPreferences | null;
 }
 
-export interface GameInsert {
-  bgg_id?: number | null;
-  name: string;
-  description?: string | null;
-  min_players?: number | null;
-  max_players?: number | null;
-  average_playtime_minutes?: number | null;
-  image_url?: string | null;
-  thumbnail_url?: string | null;
-  year_published?: number | null;
+/** Profile with game collection — used on profile detail page */
+export interface ProfileWithCollection extends Profile {
+  game_collections: GameCollection[];
 }
 
-export interface GameCollectionInsert {
-  user_id: string;
-  game_id: string;
-  status?: GameCollectionStatus;
-  notes?: string | null;
-}
-
-export interface UserRatingInsert {
-  rater_id: string;
-  rated_user_id: string;
-  rating: number;
-  review?: string | null;
-}
-
-export interface UserAvailabilityInsert {
-  user_id: string;
-  day_of_week: AvailabilityDay;
-  start_time: string;
-  end_time: string;
-}
-
-export interface UserFavoriteGameInsert {
-  user_id: string;
-  game_id: string;
-}
-
-export interface UserFavoriteGenreInsert {
-  user_id: string;
-  genre_id: string;
-}
-
-// ============================================================
-// UPDATE TYPES — all fields Partial (id is excluded as it's immutable)
-// ============================================================
-
-export type ProfileUpdate = Partial<Omit<ProfileInsert, 'id'>>;
-
-export type GameUpdate = Partial<GameInsert>;
-
-export type GameCollectionUpdate = Partial<Omit<GameCollectionInsert, 'user_id' | 'game_id'>>;
-
-export type UserRatingUpdate = Partial<Omit<UserRatingInsert, 'rater_id' | 'rated_user_id'>>;
-
-// ============================================================
-// JOINED / EXTENDED TYPES — for common query patterns
-// ============================================================
-
-/**
- * Full profile with all related data loaded.
- * Used for profile detail pages and player discovery.
- */
-export interface ProfileWithDetails extends Profile {
-  favorite_games: (UserFavoriteGame & { game: Game })[];
-  favorite_genres: (UserFavoriteGenre & { genre: GameGenre })[];
-  availability: UserAvailability[];
-  game_collections: (GameCollection & { game: Game })[];
+/** Fully hydrated profile — used on the full profile view */
+export interface ProfileFull extends Profile {
+  gaming_preferences: GamingPreferences | null;
+  game_collections: GameCollection[];
+  received_ratings: PlayerRating[];
+  /** Mean of all received ratings (1–5), or null if no ratings yet */
   average_rating: number | null;
-  rating_count: number;
 }
 
-/**
- * Game with its associated genres loaded.
- */
-export interface GameWithGenres extends Game {
-  genres: GameGenre[];
-}
-
-// ============================================================
-// DATABASE INTERFACE — for Supabase generic typing
-// Pass this as the generic parameter to createClient<Database>()
-// ============================================================
+// ------------------------------------------------------------
+// Supabase Database Generic Type
+// Pass this to createClient<Database>() for full type inference
+// on all table queries throughout the application.
+// ------------------------------------------------------------
 
 export interface Database {
   public: {
     Tables: {
       profiles: {
         Row: Profile;
-        Insert: ProfileInsert;
+        Insert: ProfileInsert & { id: string };
         Update: ProfileUpdate;
       };
-      games: {
-        Row: Game;
-        Insert: GameInsert;
-        Update: GameUpdate;
-      };
-      game_genres: {
-        Row: GameGenre;
-        Insert: { name: string; description?: string | null };
-        Update: Partial<Omit<GameGenre, 'id' | 'created_at'>>;
-      };
-      game_genre_mappings: {
-        Row: GameGenreMapping;
-        Insert: GameGenreMapping;
-        Update: never;
-      };
-      user_favorite_games: {
-        Row: UserFavoriteGame;
-        Insert: UserFavoriteGameInsert;
-        Update: never;
-      };
-      user_favorite_genres: {
-        Row: UserFavoriteGenre;
-        Insert: UserFavoriteGenreInsert;
-        Update: never;
-      };
-      user_availability: {
-        Row: UserAvailability;
-        Insert: UserAvailabilityInsert;
-        Update: Partial<UserAvailabilityInsert>;
+      gaming_preferences: {
+        Row: GamingPreferences;
+        Insert: GamingPreferencesInsert;
+        Update: GamingPreferencesUpdate;
       };
       game_collections: {
         Row: GameCollection;
         Insert: GameCollectionInsert;
         Update: GameCollectionUpdate;
       };
-      user_ratings: {
-        Row: UserRating;
-        Insert: UserRatingInsert;
-        Update: UserRatingUpdate;
+      player_ratings: {
+        Row: PlayerRating;
+        Insert: PlayerRatingInsert;
+        Update: PlayerRatingUpdate;
       };
-    };
-    Enums: {
-      experience_level: ExperienceLevel;
-      player_count_preference: PlayerCountPreference;
-      availability_day: AvailabilityDay;
-      game_collection_status: GameCollectionStatus;
-      session_status: SessionStatus;
-      rsvp_status: RsvpStatus;
-      group_role: GroupRole;
-      message_type: MessageType;
     };
   };
 }
