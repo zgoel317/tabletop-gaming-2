@@ -1,0 +1,40 @@
+# Supabase Local Development Configuration
+# Run `supabase start` to spin up the local stack using these settings.
+# See https://supabase.com/docs/guides/cli/config for all available options.
+
+[api]
+# Port for the local PostgREST API (Supabase REST interface)
+port = 54321
+
+[db]
+# Port for the local PostgreSQL instance
+port = 54322
+
+[studio]
+# Port for the local Supabase Studio dashboard
+port = 54323
+
+[inbucket]
+# Port for the local email testing inbox (captures auth emails)
+port = 54324
+
+[auth]
+# The URL of your application — used in auth redirect emails
+site_url = "http://localhost:3000"
+# Additional URLs allowed as OAuth/magic-link redirect targets
+additional_redirect_urls = ["https://localhost:3000"]
+# JWT access token expiry in seconds (1 hour)
+jwt_expiry = 3600
+# Allow new users to sign up
+enable_signup = true
+
+[auth.email]
+# Allow email-based signup
+enable_signup = true
+# Disable email confirmation in development for faster iteration
+# Set to true in production
+confirm_email = false
+
+[storage]
+# Maximum file size for Storage uploads
+file_size_limit = "50MiB"
