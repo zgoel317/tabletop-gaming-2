@@ -1,0 +1,52 @@
+{
+  "overview": "This PR establishes the full Supabase backend foundation for the Tabletop Gaming Networking App. It adds SQL migrations creating core tables (profiles, gaming_preferences, game_collections, player_ratings) with RLS policies and triggers, performance indexes, TypeScript types mirroring the schema, server/client Supabase client factories, and database helper functions. Seed data for local development and a local Supabase config are also included.",
+  "summary_json": {
+    "New tables": "profiles, gaming_preferences, game_collections, player_ratings",
+    "Auth integration": "profiles.id references auth.users; handle_new_user() trigger auto-creates profile + gaming_preferences on signup",
+    "RLS": "Row Level Security policies applied on all tables",
+    "Required env vars": "NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY",
+    "Migration order": "001_initial_schema.sql must run before 002_indexes.sql",
+    "Seed data": "Dev-only; bypasses trigger; do NOT run in production",
+    "Breaking note": "Do not manually insert into profiles after signup — trigger handles it; use updateProfile() for onboarding fields"
+  },
+  "files_changed": [
+    {
+      "path": "project/supabase/migrations/001_initial_schema.sql",
+      "summary": "Creates core tables (profiles, gaming_preferences, game_collections, player_ratings) with RLS policies, trigger functions, and auth.users foreign key linkage."
+    },
+    {
+      "path": "project/supabase/migrations/002_indexes.sql",
+      "summary": "Adds performance indexes on frequently queried columns (location, username, is_public, user_id, bgg_game_id) across core tables."
+    },
+    {
+      "path": "project/supabase/seed.sql",
+      "summary": "Provides idempotent dev-only seed data for profiles and related tables using stable hardcoded UUIDs; not for production use."
+    },
+    {
+      "path": "project/src/types/database.ts",
+      "summary": "Exports TypeScript interfaces and enums mirroring the SQL schema for full type inference across the app."
+    },
+    {
+      "path": "project/src/lib/database.ts",
+      "summary": "Server-side helper functions abstracting Supabase queries (getProfile, updateProfile, game collections, ratings) using the RLS-respecting server client."
+    },
+    {
+      "path": "project/supabase/config.toml",
+      "summary": "Configures local Supabase stack ports, auth settings (email signup, no email confirmation in dev), and storage limits."
+    },
+    {
+      "path": "project/src/lib/supabase.ts",
+      "summary": "Exports a typed browser-side Supabase client using the anon key and Database generic for RLS-compliant client queries."
+    },
+    {
+      "path": "project/src/lib/supabase/server.ts",
+      "summary": "Exports createServerSupabaseClient() factory using session cookies for RLS-compliant server-side queries in Server Components and Route Handlers."
+    },
+    {
+      "path": "project/.env.local.example",
+      "summary": "Documents required environment variables (Supabase URL, anon key, service role key) with copy-and-fill instructions."
+    }
+  ],
+  "extras": "Verify by running `supabase start`, applying migrations in order (001 then 002), and optionally seeding with seed.sql in dev. Confirm handle_new_user() trigger fires correctly on auth signup before bypassing with direct profile inserts. Follow-up: consider running `npm run db:types` to auto-generate database.ts from the live schema and diff against the hand-written types.",
+  "fallback_text": "PR #13 sets up the Supabase database layer for the Tabletop Gaming Networking App. Two SQL migrations create core tables (profiles, gaming_preferences, game_collections, player_ratings) with RLS policies and a handle_updated_at trigger, followed by performance indexes. A dev-only seed file provides stable test data. TypeScript types in src/types/database.ts mirror the schema, and two Supabase client files (browser and server) provide typed, RLS-aware access. A database.ts helper library wraps common queries server-side. Local Supabase config and an env example file round out the setup. Key constraint: never insert into profiles manually post-signup — the handle_new_user() trigger does it automatically. Required env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY (server-only)."
+}
