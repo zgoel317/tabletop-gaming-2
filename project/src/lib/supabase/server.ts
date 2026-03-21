@@ -1,13 +1,20 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { Database } from '@/types/database.types';
+import type { Database } from '@/types/database';
 
 /**
- * Creates a Supabase client for use in Server Components, Server Actions,
- * and Route Handlers. Handles cookie management for session persistence.
+ * Server-side Supabase client factory, typed with the full Database schema.
+ *
+ * Call this function inside Server Components, Server Actions, and Route
+ * Handlers. A new client is created per request so that cookies (and
+ * therefore the user session) are correctly scoped.
+ *
+ * Example:
+ *   const supabase = createSupabaseServerClient();
+ *   const { data: { user } } = await supabase.auth.getUser();
  */
-export async function createClient() {
-  const cookieStore = await cookies();
+export function createSupabaseServerClient() {
+  const cookieStore = cookies();
 
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,49 +28,17 @@ export async function createClient() {
           try {
             cookieStore.set({ name, value, ...options });
           } catch {
-            // The `set` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing sessions.
+            // set() can throw in read-only Server Component contexts;
+            // the middleware is responsible for refreshing the session.
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value: '', ...options });
           } catch {
-            // The `delete` method was called from a Server Component.
-            // This can be ignored if you have middleware refreshing sessions.
+            // Same as above — safe to ignore in read-only contexts.
           }
         },
-      },
-    }
-  );
-}
-
-/**
- * Creates a Supabase admin client using the service role key.
- * This bypasses RLS — only use in trusted server-side contexts.
- * Never expose the service role key to the client.
- */
-export function createAdminClient() {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!serviceRoleKey) {
-    throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY is not set. Admin client cannot be created.'
-    );
-  }
-
-  return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    serviceRoleKey,
-    {
-      cookies: {
-        get: () => undefined,
-        set: () => {},
-        remove: () => {},
-      },
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
       },
     }
   );

@@ -1,19 +1,26 @@
-import { createBrowserClient } from '@supabase/ssr';
-import type { Database } from '@/types/database.types';
+import { createClient } from '@supabase/supabase-js';
+import type { Database } from '@/types/database';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 /**
- * Creates a Supabase client for use in browser/client components.
- * Uses the Database generic type for full type safety.
+ * Browser-side Supabase client, typed with the full Database schema.
+ *
+ * Import this in Client Components and browser-side utility modules.
+ * For Server Components and Route Handlers use the server client
+ * from '@/lib/supabase/server' instead.
  */
-export function createClient() {
-  return createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+
+/**
+ * Helper that returns the typed browser client.
+ * Useful when you need to pass the client as a dependency.
+ */
+export function getSupabaseClient() {
+  return supabase;
 }
 
-/**
- * Singleton browser client for convenience in client components.
- * Use createClient() for SSR scenarios or when you need a fresh instance.
- */
-export const supabase = createClient();
+// Re-export createClient so database.ts can instantiate its own typed client
+// without duplicating the import path.
+export { createClient };
